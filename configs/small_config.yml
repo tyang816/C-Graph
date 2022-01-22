@@ -1,0 +1,24 @@
+data:
+  home: data
+  base: /base.json
+  class: /class.json
+
+preprocess:
+  token_size: 100
+  
+model:
+  num_embedding: 128
+  num_hidden: 128
+  biGRU_layer: 1
+  GAT_layer: 4
+  GAT_dropout: 0.1
+  weight_decay: 0.0001
+  graph_batch_size: 20
+  lr: 0.001
+
+train:
+  run_times: 5
+
+etc:
+  author: tanyang
+  info_prefix: context-aware
