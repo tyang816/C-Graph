@@ -11,7 +11,6 @@
 
 import json
 import re
-from torchtext.legacy.data import Field
 import torch
 
 def load(path, key=None):
@@ -24,17 +23,19 @@ def load(path, key=None):
     """
     with open(path, 'r', encoding='utf-8') as f:
         lines = f.readlines()
+    new_lines = []
     if key == None or key == 'base':
-        return lines
+        for line in lines:
+            l = eval(line)
+            new_lines.append(l)
     elif key == 'class':
-        new_lines = []
         for line in lines:
             l = eval(line)
             c_line = []
             for c in l:
                 c_line.append(c)
             new_lines.append(c_line)
-        return new_lines
+    return new_lines
         
 
 
@@ -61,7 +62,7 @@ def load_base(path, is_json=False, key=None, drop_list=()):
         return [json.loads(line)[key] for i, line in enumerate(lines) if not i in drop_list]
 
 
-def load_class(path, source_id=None, is_vocab=False):
+def load_class(path, key=None, source_id=None, is_vocab=False):
     """
     load class(function related to target function) code
 
@@ -79,14 +80,14 @@ def load_class(path, source_id=None, is_vocab=False):
             if json.loads(line)['id'] == source_id:
                 target_line = json.loads(line)
                 break
-        related_class_list = target_line['class_methods']
+        related_class_list = target_line[key]
         related_class_full = []
         for c in related_class_list:
             related_class_full.append(str(c['full']))
         return related_class_full
     # load all
     else:
-        related_class_list = [json.loads(line)['class_methods'] for i,line in enumerate(lines)]
+        related_class_list = [json.loads(line)[key] for i,line in enumerate(lines)]
         related_class_full = []
         # build vocab and return a one layer class list
         if is_vocab:
@@ -118,12 +119,6 @@ def tokenize_code(lines):
         # underscore or none-alphabetical letters to space
         new_lines.append(str((re.sub(r'[^A-Za-z]+', ' ', line).strip().lower())).split())
     return new_lines
-    #     for line in lines:
-    #         # camelCase to undersocre
-    #         line = re.sub(r'([a-z])([A-Z])',r'\1_\2', line)
-    #         # underscore or none-alphabetical letters to space
-    #         new_lines = new_lines + str((re.sub(r'[^A-Za-z]+', ' ', line).strip().lower())).split()
-    #     return new_lines
 
 
 def save(data, path, is_json=False):
