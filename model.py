@@ -11,6 +11,8 @@
 
 from utils import data_tools as dt
 import torch
+from torch import Tensor
+
 import torch.nn as nn
 import torch.nn.functional as f
 from torch_geometric.data import InMemoryDataset,Data
@@ -19,6 +21,8 @@ from torch_geometric.nn import GATConv
 from torchtext.legacy.data import Field, TabularDataset, Iterator
 import math
 
+def _fix_enc_hidden(hidden):
+    return torch.cat([hidden[0:hidden.size(0):2], hidden[1:hidden.size(0):2]], 2).squeeze(0)
 
 class LocalEncoder(nn.Module):
     def __init__(self, vocab_size, embed_size, num_inputs, num_hiddens, num_layers):
@@ -34,10 +38,13 @@ class LocalEncoder(nn.Module):
         self.embedding = nn.Embedding(vocab_size, embed_size)
         self.biGRU = nn.GRU(num_inputs, num_hiddens, num_layers, bidirectional=True)
 
+    
     def forward(self, X):
-        vec = self.embedding(X)
-        output, state = self.biGRU(vec)
-        return output, state
+        vec = self.embedding(X).permute(1,0,2)
+        _, state = self.biGRU(vec)
+        # concat the last hidden states
+        concated_state = _fix_enc_hidden(state)
+        return concated_state
 
 
 class classGraphDataset(InMemoryDataset):
@@ -101,8 +108,8 @@ class classGraphDataset(InMemoryDataset):
 
 
 class GlobalEncoder(nn.Module):
-    def __init__(self, vocab_size, le_embed_size, le_num_inputs, le_num_hiddens, le_num_layers,
-                 GAT_num_layer,GAT_dropout):
+    def __init__(self, vocab_size, embed_size, GRU_num_inputs, GRU_num_hiddens, GRU_num_layers,
+                 GAT_num_layers, GAT_in_features, GAT_out_features, GAT_dropout):
         """
         build C-Graph, vertex initialization and graph attention network
 
@@ -113,22 +120,48 @@ class GlobalEncoder(nn.Module):
         """
         super(GlobalEncoder, self).__init__()
         self.localEncoder = LocalEncoder(
-            vocab_size, le_embed_size, le_num_inputs, le_num_hiddens, le_num_layers)
-        self.GAT = GATConv(dropout=GAT_dropout)
-
+            vocab_size, embed_size, GRU_num_inputs, GRU_num_hiddens, GRU_num_layers)
+        self.GAT = GATConv(GAT_in_features, GAT_out_features, dropout=GAT_dropout,add_self_loops=False)
+        self.GATs = nn.ModuleList([self.GAT for _ in range(GAT_num_layers)])
+        
         
     def forward(self, data):
         x, edge_index, batch = data.x, data.edge_index, data.batch
         # vertex initialization
-        print(x.size())
-        _, x = self.localEncoder(x)
-        print(x)
+        g = self.localEncoder(x)
+        q_n = g[0]
+        print(q_n.size())
+        for GAT in self.GATs:
+            g = GAT(g, edge_index)
+        g_t = g[0]
+        print(g_t.size())
 
-        return 
+        return g_t, q_n
+
+
 
 class Decoder(nn.Module):
-    def __init__(self):
-        super().__init__()
+    def __init__(self, num_inputs, num_hiddens):
+        """
+        adpot a GRU and use the concatenation of global representation g_t and local representation q_n
+        """
+        super(Decoder, self).__init__()
+        self.GRU = nn.GRU(num_inputs, num_hiddens, bidirectional=False)
+
+    def init_state(self, glo_enc_outputs, loc_enc_outputs):
+        return torch.cat((glo_enc_outputs.unsqueeze(0), loc_enc_outputs.unsqueeze(0)), 0)
+
+    def graph_attention(self):
+        return
+    
+    def local_attention(self):
+        return 
+    
+    def pointer(self):
+        return
+
+    def forward(self, X, state):
+        return 
 
 
 class Net(nn.Module):
@@ -145,11 +178,19 @@ class Net(nn.Module):
 # print(out.size(), hid.size())
 
 class_graph_data = classGraphDataset(root='./data') # 40 samples
-data_loader = DataLoader(class_graph_data, batch_size=20, shuffle=True)
-for batch in data_loader:
-    globalencoder = GlobalEncoder(1704, 128, 128, 128, 1)
-    print(globalencoder(batch))
-    # print(batch)
-    # print(batch.x)
-    break
+print(class_graph_data[0])
+globalencoder = GlobalEncoder(vocab_size=1704+1, embed_size=128, GRU_num_inputs=128, GRU_num_hiddens=128, GRU_num_layers=1,
+                              GAT_num_layers=4, GAT_in_features=256, GAT_out_features=256, GAT_dropout=0.1)
+    
+glo_enc_outputs, loc_enc_outputs = globalencoder(class_graph_data[0])
+
+decoder = Decoder(128, 128)
+state = decoder.init_state(glo_enc_outputs, loc_enc_outputs)
+print(state.size())
+# data_loader = DataLoader(class_graph_data, batch_size=20, shuffle=True)
+# for batch in data_loader:
+#     print(batch.num_graphs)
+#     # print(batch)
+#     # print(batch.x)
+#     break
 
