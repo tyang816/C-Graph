@@ -136,5 +136,3 @@ def save(data, path, is_json=False):
             if is_json:
                 line = '' if not line else json.dumps(line)
             f.write(line + '\n')
-
-#print(load_class('../data', '/class.json'))

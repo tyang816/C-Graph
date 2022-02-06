@@ -2,6 +2,11 @@ data:
   home: data
   base: /base.json
   class: /class.json
+  field_summary: /field/field.SUMMARY.pkl
+  field_method: /field/field.METHOD.pkl
+  raw_base_method: /raw/data.BASE_METHOD.json
+  raw_base_summary: /raw/data.BASE_SUMMARY.json
+  raw_class_method: /raw/data.CLASS_METHOD.json
 
 preprocess:
   token_size: 100

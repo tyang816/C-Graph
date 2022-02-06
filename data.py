@@ -78,7 +78,7 @@ class Vocab(object):
             torch.save(METHOD, '{}/field/field.METHOD.pkl'.format(self.root))
         elif key == 'summary':
             SUMMARY = Field(sequential=True, lower=True, init_token=bos, eos_token=eos, 
-                            pad_token=pad, unk_token=unk, fix_length=100)
+                            pad_token=pad, unk_token=unk)
             if isinstance(data_name, list):
                 data = []
                 for i in range(len(data_name)):
@@ -164,10 +164,12 @@ if __name__ == '__main__':
     vocab.build_raw_data(data_name=BASE_DATA, category='base', key='summary')
 
     vocab.build_vocab(data_name=['/raw/data.BASE_METHOD.json', '/raw/data.CLASS_METHOD.json'], key='method')
-    vocab.build_vocab(data_name='/raw/data.BASE_METHOD.json', key='summary')
+    vocab.build_vocab(data_name='/raw/data.BASE_SUMMARY.json', key='summary')
 
     # test the `field`
     method_vocab = vocab.load_vocab('/field/field.METHOD.pkl')
-    print(len(method_vocab.vocab))
-    # base = dt.tokenize_code(lines_base)
-    # print(m2.process(base).T,m2.process(base).T.size())
+    summary_vocab = vocab.load_vocab('/field/field.SUMMARY.pkl')
+    method = [["override", "public", "object"]]
+    summary = [["answers", "a", "copy", "of", "this", "object"]]
+    print(method_vocab.process(method).T, method_vocab.process(method).T.size())
+    print(summary_vocab.process(summary).T, summary_vocab.process(summary).T.size())
