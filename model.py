@@ -2,7 +2,7 @@
 '''
 @File    :   model.py
 @Time    :   2021/12/02 16:26:12
-@Author  :   Tan Yang 
+@Author  :   Tan Yang
 @Version :   1.0
 @Contact :   mashiroaugust@gmail.com
 '''
@@ -20,201 +20,117 @@ from torch_geometric.data import Data
 from torch_geometric.loader import DataLoader
 from torch_geometric.nn import GATConv
 from torchtext.legacy.data import Field, TabularDataset, Iterator
-import math
 
 
-" extract features from the source code token sequence of the target function "
-class LocalEncoder(nn.Module):
-    def __init__(self, vocab_size, embed_size, num_inputs, num_hiddens, num_layers):
-        """
-        params:
-            vocab_size: the lenth of vocab
-            embed_size: 128
-            num_inputs: GRU H_in, num_inputs == embed_size, 128
-            num_hiddens: GRU H_out, 128
-            num_layers: the number of GRU layer, 1
-        """
-        super(LocalEncoder, self).__init__()
-        self.embedding = nn.Embedding(vocab_size, embed_size)
-        self.biGRU = nn.GRU(num_inputs, num_hiddens, num_layers, bidirectional=True)
+def element_wise_mul(input1, input2):
+    feature_list = []
+    for feature_1, feature_2 in zip(input1, input2):
+        feature_2 = feature_2.unsqueeze(1).expand_as(feature_1)
+        feature = feature_1 * feature_2
+        feature_list.append(feature.unsqueeze(0))
+    output = torch.cat(feature_list, 0)
+    return output
 
-    def forward(self, X):
-        """
-        params:
-            X: the code sequence, (batch_size, token_size)
-        """
-        # embedded: [token_size, num_nodes, embed_size]
-        embedded = self.embedding(X).permute(1,0,2)
-        # out: [token_size, num_nodes, num_direction * H_out]
-        # h_n(state): [num_direction * num_layers, num_nodes, H_out]
-        out, state = self.biGRU(embedded)
-        out = torch.cat((out[:,:,:128], torch.flip(out[:,:,128:], [0])), 2)
-        # concat the last hidden states, reduce dimension
-        # concated_state: [num_nodes, 2 * H_out]
-        concated_state = torch.cat((state[0], state[1]), 1)
-        return out, concated_state
+class ClassGraph(nn.Module):
+    def __init__(self, config, device):
+        super(ClassGraph, self).__init__()
+        self.name = 'class level graph'
+        self.config = config
+        self.batch_size = int(config['model']['batch_size'])
+        self.embed_size = int(config['model']['embed_size'])
+        self.hidden_size = int(config['model']['hidden_size'])
+        self.code_vocab_size = int(config['model']['code_vocab_size'])
+        self.com_vocab_size = int(config['model']['com_vocab_size'])
+        self.max_code_len = int(config['model']['max_code_len'])
+        self.max_com_len = int(config['model']['max_com_len'])
+        self.max_node_num = int(config['model']['max_node_num'])
+        self.gat_input_size = int(config['model']['gat_input_size'])
+        self.gat_hidden_size = int(config['model']['gat_hidden_size'])
+        self.gat_dropout = int(config['model']['gat_dropout'])
 
-" build C-Graph, vertex initialization and graph attention network "
-class GlobalEncoder(nn.Module):
-    def __init__(self, vocab_size, embed_size, GRU_num_inputs, GRU_num_hiddens, GRU_num_layers,
-                 GAT_num_layers, GAT_in_features, GAT_out_features, GAT_dropout):
-        """
-        params:
-            LocalEncoder: vocab_size, embed_size, GRU_num_inputs, GRU_num_hiddens, GRU_num_layers
-            GAT_num_layers: the number of GAT layer, 4
-            GAT_in_features: num_direction * H_out, 2 * 128
-            GAT_out_features: num_direction * H_out, 2 * 128
-            GAT_dropout: dropout, 0.1
-        """
-        super(GlobalEncoder, self).__init__()
-        self.localEncoder = LocalEncoder(
-            vocab_size, embed_size, GRU_num_inputs, GRU_num_hiddens, GRU_num_layers)
-        self.GAT = GATConv(GAT_in_features, GAT_out_features, dropout=GAT_dropout,add_self_loops=False)
-        self.GATs = nn.ModuleList([self.GAT for _ in range(GAT_num_layers)])
-        
-        
+        self.CodeEmbed = nn.DataParallel(nn.Embedding(self.code_vocab_size, self.embed_size))
+        self.biGRU = nn.DataParallel(nn.GRU(self.embed_size, self.hidden_size, 1, bidirectional=True, batch_first=True))
+        self.GAT = nn.DataParallel(GATConv(self.gat_input_size, self.gat_hidden_size, dropout=self.gat_dropout))
+        self.fc = nn.DataParallel(nn.Linear(2 * self.gat_input_size, self.hidden_size))
+        self.ComEmbed = nn.DataParallel(nn.Embedding(self.com_vocab_size, self.embed_size))
+        self.DeGRU = nn.DataParallel(nn.GRU(self.embed_size, self.hidden_size, 1, batch_first=True))
+        self.W_ga = nn.DataParallel(nn.Linear(self.gat_input_size, self.hidden_size, bias=False))
+        self.W_la = nn.DataParallel(nn.Linear(self.gat_input_size, self.hidden_size, bias=False))
+        self.W_v = nn.DataParallel(nn.Linear(5 * self.hidden_size, self.max_code_len))
+        self.w_h = nn.DataParallel(nn.Linear(self.hidden_size, 1, bias=False))
+        self.w_c = nn.DataParallel(nn.Linear(2 * self.hidden_size, 1, bias=False))
+        self.w_y = nn.DataParallel(nn.Linear(self.hidden_size, 1, bias=False))
+        self.leakRelu = nn.DataParallel(nn.LeakyReLU(0.2))
+        self.fc_out = nn.DataParallel(nn.Linear(self.max_code_len, self.com_vocab_size))
+
     def forward(self, data):
-        """
-        params:
-            data: data of a graph
-            data.x: [num_nodes, token_size]
-            data.edge_index: [2, num_edges]
-        """
-        x, edge_index, batch = data.x, data.edge_index, data.batch
-        # vertex initialization
-        # g: [token_size, num_nodes, num_direction * H_out] 
-        # q_n: [num_nodes, 2 * H_out]
-        q, q_n = self.localEncoder(x)
-        print('q:',q.shape)
+        x, edge_index, y = data.x, data.edge_index, data.y
+        """Enocoder"""
+        # code_embed: [batch_size, code_len] => [batch_size, code_len, embed_size]
+        code_embed = self.CodeEmbed(x)
+        # out: [batch_size, code_len, hidden_size]
+        out, state = self.biGRU(code_embed)
+        # q: [batch_size, code_len, 2 * hidden_size]
+        q = torch.cat((out[:, :, :128], torch.flip(out[:, :, 128:], [0])), 2)
+        # concat the last hidden states, reduce dimension
+        # q_n: [batch_size * node_num, 2 * hidden_size]
+        q_n = torch.cat((state[0], state[1]), 1)
         g = q_n
-        print('q_n:', q_n.shape)
-        for GAT in self.GATs:
-            g = GAT(g, edge_index)
-        print('g:', g.shape)
-        return g, q_n, q
+        for i in range(4):
+            g = self.GAT(g, edge_index)
+        # g_reshape: [batch_size, node_num, 2 * hidden_size]
+        g_reshape = g.contiguous().view(self.batch_size, -1, 2 * self.hidden_size)
+        # qn_reshape: [batch_size, node_num, 2 * hidden_size]
+        qn_reshape = q_n.contiguous().view(self.batch_size, -1, 2 * self.hidden_size)
+        # q_reshape: [batch_size, node_num, code_len, 2 * hidden_size]
+        q_reshape = q.contiguous().view(self.batch_size, self.max_node_num, -1, 2 * self.hidden_size)
 
+        """"Decoder"""
+        # find the target node
+        # g_t: [batch_size, gat_input_size]
+        g_t = g_reshape[:,0,:].squeeze(1)
+        # qn_t: [batch_size, 2 * hidden_size]
+        qn_t = qn_reshape[:,0,:].squeeze(1)
+        # q_t: [batch_size, code_len, 2 * hidden_size]
+        q_t = q_reshape[:,0,:,:].squeeze(1)
+        # de_init_state: [batch_size, 2 * gat_input_size]
+        de_init_state = self.fc(torch.cat((qn_t, g_t), 1))
+        # com_embed: [batch_size, com_len] => [batch_size, com_len, embed_size]
+        com_embed = self.ComEmbed(y)
+        # out: [batch_size, com_len, hidden_size]
+        out, state = self.DeGRU(com_embed, de_init_state.unsqueeze(0))
 
-" leverage a graph attention mechanism "
-class Attention(nn.Module):
-    def __init__(self, num_inputs, num_hiddens, key):
-        """
-        params:
-            num_inputs:
-            num_hiddens: 
-        """
-        super(Attention, self).__init__()
-        self.W_ga = nn.Linear(num_inputs, num_hiddens, bias=False)
-        self.type = key
+        """Graph Attention"""
+        # g_reshape_: [batch_size, hidden_size, node_num]
+        g_ = self.W_ga(g_reshape).transpose(1,2)
+        # [batch_size, com_len, hidden_size] x [batch_size, hidden_size, node_num]
+        # socres/gamma: [batch_size, com_len, node_num]
+        scores = torch.bmm(out, g_)
+        gamma = f.softmax(scores, dim=-1)
+        # [batch_size, com_len, node_num] x [batch_size, node_num, 2 * hidden_size]
+        # cg: [batch_size, com_len, 2 * hidden_size]
+        cg = torch.bmm(gamma, g_reshape)
 
-    def forward(self, h, g):
-        """
-        params:
-            h: the hidden vector of decoder GRU, [time_step, batch_size, H_out]
-            g: the last layer hidden vector of the GAT, [num_nodes, GAT_out_features]
-        """
-        assert self.type in ['graph','local'], "key should be `graph` or `local`"
-        self.cg = []
-        self.gamma = []
-        for h_i in h:
-            # print(h_i.shape,self.W_ga(g).shape)
-            w = self.W_ga(g)
-            gamma_ij = f.softmax(torch.mm(w, h_i.T), 0)
-            self.gamma.append(gamma_ij)
-            # print('gamma_ij:', gamma_ij.shape) 
-            cg_i = torch.mm(gamma_ij.T, g)
-            # print('cg_i:', cg_i.shape)
-            self.cg.append(cg_i)
-        # len(self.cg) == decoder time step
-        # context: [time_step, 2 * num_hiddens]
-        context = self.cg[0]
-        for i in range(1, len(self.cg)):
-            context = torch.cat((context, self.cg[i]), 0)
-        print(self.type + '_context:', context.shape)
+        """Local Attention"""
+        # q_: [batch_size, hidden_size, code_len]
+        q_ = self.W_la(q_t).transpose(1,2)
+        # [batch_size, com_len, hidden_size] x [batch_size, hidden_size, code_len]
+        # socres/beta: [batch_size, com_len, code_len]
+        scores = torch.bmm(out, q_)
+        beta = f.softmax(scores, dim=-1)
+        # [batch_size, com_len, code_len] x [batch_size, code_len, 2 * hidden_size]
+        # c: [batch_size, com_len, 2 * hidden_size]
+        c = torch.bmm(beta, q_t)
         
-        if self.type == 'local':
-            beta = self.gamma[0].T
-            print(beta.shape)
-            for i in range(1, len(self.gamma)):
-                beta = torch.cat((beta, self.gamma[i].T), 0)
-            print('beta:',beta.shape)
-            return context, beta
-        return context
-        
-" pointer mechanism "
-class Pointer(nn.Module):
-    def __init__(self, vocab_size, num_inputs, num_hiddens):
-        """
-        params:
-            num_inputs: the 1th dimension of the `[h_i || c_i || cg_i]`
-            num_hiddens: embed_size, 128
-        """
-        super(Pointer, self).__init__()
-        self.W_v = nn.Linear(num_inputs, 100)
-        self.w_h = nn.Linear(4 * num_hiddens, 1, bias=False)
-        self.w_c = nn.Linear(2 * num_hiddens, 1, bias=False)
-        self.w_y = nn.Linear(num_hiddens, 1, bias=False)
-        self.leakRelu = nn.LeakyReLU(0.2)
-        self.fc_out = nn.Linear(100, vocab_size)
-
-    def forward(self, h, c, cg, beta, y):
-        """
-        params:
-            h: [time_step, 4 * H_out]
-            c: [time_step, 2 * H_out]
-            cg: [time_step, 2 * H_out]
-            beta: [time_step, token_size]
-            y: [time_step, H_out]
-        """
-        concat = torch.cat((h, c, cg), 1)
-        P_vocab = f.softmax(self.W_v(concat), 1)
-        print('P_vocab:',P_vocab.shape)
-        p_gen = self.leakRelu(self.w_h(h) + self.w_c(c) + self.w_y(y)).repeat(1,100)
-        print('p_gen:',p_gen.shape)
-        P_w = torch.mul(p_gen, P_vocab) + torch.mul((torch.ones_like(p_gen) - p_gen), beta)
-        print('P_w:', P_w.shape)
+        """Pointer"""
+        concat = torch.cat((out, c, cg), 2)
+        # [batch_size, com_len, 5 * hidden_size] => [batch_size, com_len, code_len]
+        P_vocab = f.softmax(self.W_v(concat), dim=1)
+        # p_gen: [batch_size, com_len]
+        p_gen = self.leakRelu(self.w_h(out) + self.w_c(c) + self.w_y(com_embed)).squeeze(2)
+        # [batch_size, com_len, code_len] * [batch_size, com_len]
+        # P_w: [batch_size, com_len, code_len]
+        P_w = element_wise_mul(P_vocab, p_gen) + element_wise_mul(beta, torch.ones_like(p_gen) - p_gen)
+        # pre: [batch_size, com_len, com_vocab_size]
         pre = self.fc_out(P_w)
-        print('pre:', pre.shape)
         return pre
-
-" adpot a GRU and use the concatenation of global representation g_t and local representation q_n "
-class Decoder(nn.Module):
-    def __init__(self, vocab_size, embed_size, num_inputs, num_hiddens):
-        """
-        params:
-            vocab_size: the lenth of vocab
-            embed_size:
-            num_inputs:
-            num_hiddens: 
-        """
-        super(Decoder, self).__init__()
-        self.num_hiddens = 4 * num_hiddens
-        self.embedding = nn.Embedding(vocab_size, embed_size)
-        self.GRU = nn.GRU(num_inputs, self.num_hiddens, bidirectional=False)
-        self.GraphAttention = Attention(2 * embed_size, self.num_hiddens, 'graph')
-        self.LocalAttention = Attention(2 * embed_size, self.num_hiddens, 'local')
-        self.Pointer = Pointer(1704, 2 * self.num_hiddens, embed_size)
-
-    def forward(self, X, glo_enc_outputs, loc_enc_hiddens, loc_enc_outputs):
-        """
-        params:
-            X: summary, [batch_size, time_step]
-            glo_enc_outputs: [num_nodes, 2 * num_hiddens]
-            loc_enc_hiddens: GRU output, [num_nodes, 2 * num_hiddens]
-            loc_enc_outputs: hidden vector of each `t`, [time_step, num_nodes, 2 * num_hiddens]
-        """
-        state = torch.cat((glo_enc_outputs[0], loc_enc_hiddens[0]), 0).repeat(1,1,1)
-        print('de_ini_state:',state.shape)
-        # embedded: [time_step, batch_size, H_out]
-        embedded = self.embedding(X).permute(1,0,2)
-        print('sum_emb:', embedded.shape)
-        # out: [time_step, batch_size, 4 * H_out]
-        out, _ = self.GRU(embedded, state)
-        print('de_out:', out.shape)
-        cg = self.GraphAttention(out, glo_enc_outputs)
-        c, beta = self.LocalAttention(out, loc_enc_outputs[:,0,:])
-        print(cg.shape, c.shape)
-        pre = self.Pointer(out.squeeze(1), c, cg, beta, embedded.squeeze(1))
-        return pre
-
-
-

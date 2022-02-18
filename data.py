@@ -14,7 +14,7 @@ import yaml
 from collections import Counter, OrderedDict
 # for `torchtext-0.11`, `Field` in the `torchtext.legacy`
 from torchtext.legacy.data import Field, TabularDataset, Iterator
-from torch_geometric.data import InMemoryDataset
+from torch_geometric.data import InMemoryDataset,Data
 import pandas as pd
 # data prepocess tools
 import utils.data_tools as dt
@@ -78,7 +78,7 @@ class Vocab(object):
             torch.save(METHOD, '{}/field/field.METHOD.pkl'.format(self.root))
         elif key == 'summary':
             SUMMARY = Field(sequential=True, lower=True, init_token=bos, eos_token=eos, 
-                            pad_token=pad, unk_token=unk)
+                            pad_token=pad, unk_token=unk,fix_length=30)
             if isinstance(data_name, list):
                 data = []
                 for i in range(len(data_name)):
@@ -110,7 +110,7 @@ class classGraphDataset(InMemoryDataset):
 
     @property
     def raw_file_names(self):
-        return ['data.BASE_METHOD.json', 'data.CLASS_METHOD.json']
+        return ['data.BASE_METHOD.json', 'data.BASE_SUMMARY.json', 'data.CLASS_METHOD.json']
 
     @property
     def processed_file_names(self):
@@ -120,38 +120,48 @@ class classGraphDataset(InMemoryDataset):
         # download dataset from internet
         pass
             
-    def class_graph(self, x, edge_index):
-        data = Data(x=x, edge_index=edge_index)
+    def class_graph(self, x, edge_index, y=None):
+        data = Data(x=x, edge_index=edge_index, y=y)
         return data
 
     def process(self):
-        base_path = self.raw_paths[0]
-        class_path = self.raw_paths[1]
-        method_field = torch.load('data/field/' + 'METHOD' + '_field.pkl')
-        # [[class1_1, class1_2, ...,], [class2_1, class2_2, ...,]]
-        node_class_list = dt.load(class_path, 'class') 
-        # [base1, base2, ...,]
-        node_base_list = dt.load(base_path, 'base')
+        base_method_path = self.raw_paths[0]
+        base_summary_path = self.raw_paths[1]
+        class_path = self.raw_paths[2]
+        method_field = torch.load('data/field/field.METHOD.pkl')
+        summary_field = torch.load('data/field/field.SUMMARY.pkl')
+        # [[method0_class0, method0_class1, ...,], [method1_class0, method1_class1, ...,]]
+        class_list = dt.load(class_path, 'class') 
+        # [method0, method1, ...,]
+        base_method_list = dt.load(base_method_path, 'base')
+        # [summary0, summary1, ...,]
+        base_summary_list = dt.load(base_summary_path, 'base')
         # each data in the list is a class level graph
         data_list = []
-        # the index of `node_classes`([class1_1, class1_2, ...,]) corresponds to the index of `base`
-        for node_classes in node_class_list:
-            # create the node of target function
-            node_list = [node_base_list[node_class_list.index(node_classes)]]
+        # the index of `classes`([method0_class0, method0_class1, ...,]) corresponds to the index of `base_method`
+        for base_idx in range(len(base_method_list)):
+            # create the node list of the target function
+            node_list = [base_method_list[base_idx]]
+            # create the summary
+            summary = [base_summary_list[base_idx]]
             # create the edges between classes and bases, default `[]`
             edge_index = [] 
-            # iterate over the entire `node_classes` to create `edge_index` and graph
-            for n_class in node_classes:
-                if n_class not in node_list:
-                    node_list.append(n_class)
-                # every `n_class` corresponds to a `class` which is related to the `base_i`
-                # where i means the index of `node_classes`, edges are bidirectional
-                edge_index.append([0, node_list.index(n_class)])
-                edge_index.append([node_list.index(n_class), 0])
+            # iterate over the entire `classes` to create `edge_index` and graph
+            classes = class_list[base_idx]
+            for c in classes:
+                if c not in node_list:
+                    node_list.append(c)
+                # every `c` corresponds to a `class` which is related to the `base_i`
+                # where i means the index of `classes`, edges are bidirectional
+                edge_index.append([0, node_list.index(c)])
+                edge_index.append([node_list.index(c), 0])
+            for i in range(100 - len(node_list)):
+                node_list.append(['<pad>'])
             # convert to tensor
             x = method_field.process(node_list).T
+            y = summary_field.process(summary).T
             edge_index = torch.tensor(edge_index, dtype=torch.long).t().contiguous()
-            data_list.append(self.class_graph(x, edge_index))
+            data_list.append(self.class_graph(x, edge_index, y))
         # save the graph data
         data_save, data_slices = self.collate(data_list)
         torch.save((data_save, data_slices), self.processed_paths[0])
