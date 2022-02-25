@@ -149,6 +149,9 @@ class classGraphDataset(InMemoryDataset):
             # iterate over the entire `classes` to create `edge_index` and graph
             classes = class_list[base_idx]
             for c in classes:
+                # max node number 100
+                if len(node_list) >= 100:
+                    break
                 if c not in node_list:
                     node_list.append(c)
                 # every `c` corresponds to a `class` which is related to the `base_i`
@@ -173,13 +176,15 @@ if __name__ == '__main__':
     vocab.build_raw_data(data_name=BASE_DATA, category='base', key='method')
     vocab.build_raw_data(data_name=BASE_DATA, category='base', key='summary')
 
-    vocab.build_vocab(data_name=['/raw/data.BASE_METHOD.json', '/raw/data.CLASS_METHOD.json'], key='method')
-    vocab.build_vocab(data_name='/raw/data.BASE_SUMMARY.json', key='summary')
+    vocab.build_vocab(data_name=[config['data']['raw_base_method'], config['data']['raw_class_method']], key='method')
+    vocab.build_vocab(data_name=config['data']['raw_base_summary'], key='summary')
 
     # test the `field`
-    method_vocab = vocab.load_vocab('/field/field.METHOD.pkl')
-    summary_vocab = vocab.load_vocab('/field/field.SUMMARY.pkl')
+    method_vocab = vocab.load_vocab(config['data']['field_method'])
+    summary_vocab = vocab.load_vocab(config['data']['field_summary'])
     method = [["override", "public", "object"]]
     summary = [["answers", "a", "copy", "of", "this", "object"]]
     print(method_vocab.process(method).T, method_vocab.process(method).T.size())
     print(summary_vocab.process(summary).T, summary_vocab.process(summary).T.size())
+
+    classGraphDataset(config['data']['home'])
