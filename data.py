@@ -35,12 +35,11 @@ config = yaml.load(open(config_path), Loader=yaml.FullLoader)
 DATA_HOME = config['data']['home']
 BASE_DATA = config['data']['base']
 CLASS_DATA = config['data']['class']
-TOKEN_SIZE = config['preprocess']['token_size']
 
 
 class Vocab(object):
-    def __init__(self, root):
-        self.root = root
+    def __init__(self, config):
+        self.config = config
     
     def build_raw_data(self, data_name, category, key):
         """
@@ -48,17 +47,21 @@ class Vocab(object):
         """
         if category == 'base':
             assert isinstance(key, str), "get raw data of `base` need to declare the key word, like `method`"
-            lines_base = dt.load_base(path=self.root+data_name, key=key, is_json=True)
+            lines_base = dt.load_base(path=DATA_HOME+data_name, key=key, is_json=True)
             token_lines_base = dt.tokenize_code(lines_base)
-            dt.save(token_lines_base, '{}/raw/data.BASE_{}.json'.format(self.root, key.upper()), is_json=True)
+            if key == 'method':
+                dt.save(token_lines_base, DATA_HOME+self.config['data']['raw_base_method'], is_json=True)
+            elif key == 'summary':
+                dt.save(token_lines_base, DATA_HOME+self.config['data']['raw_base_summary'], is_json=True)
         elif category == 'class':
-            lines_class_ = dt.load_class(path=self.root+data_name, key=key)
+            lines_class_ = dt.load_class(path=DATA_HOME+data_name, key=key)
             if key == 'class_methods':
                 key = 'method'
             token_lines_class_ = []
             for l in lines_class_:
                 token_lines_class_.append(dt.tokenize_code(l))
-            dt.save(token_lines_class_, '{}/raw/data.CLASS_{}.json'.format(self.root, key.upper()), is_json=True)
+            if key == 'method':
+                dt.save(token_lines_class_, DATA_HOME+self.config['data']['raw_class_method'], is_json=True)
     
     def build_vocab(self, data_name, key):
         """
@@ -66,27 +69,27 @@ class Vocab(object):
         """
         if key == 'method':
             METHOD = Field(sequential=True, lower=True, init_token=bos, eos_token=eos, 
-                           pad_token=pad, unk_token=unk, fix_length=100)
+                           pad_token=pad, unk_token=unk, fix_length=self.config['model']['max_code_len'])
             # METHOD vocab can built by a list of files or a single file
             if isinstance(data_name, list):
                 data = []
                 for i in range(len(data_name)):
-                    data = data + dt.load(self.root + data_name[i])
+                    data = data + dt.load(DATA_HOME + data_name[i])
             elif isinstance(data_name, str):
-                data = dt.load(self.root + data_name)
+                data = dt.load(DATA_HOME + data_name)
             METHOD.build_vocab(data)
-            torch.save(METHOD, '{}/field/field.METHOD.pkl'.format(self.root))
+            torch.save(METHOD, DATA_HOME + self.config['data']['field_method'])
         elif key == 'summary':
             SUMMARY = Field(sequential=True, lower=True, init_token=bos, eos_token=eos, 
-                            pad_token=pad, unk_token=unk,fix_length=30)
+                            pad_token=pad, unk_token=unk, fix_length=self.config['model']['max_com_len'])
             if isinstance(data_name, list):
                 data = []
                 for i in range(len(data_name)):
-                    data = data + dt.load(self.root + data_name[i])
+                    data = data + dt.load(DATA_HOME + data_name[i])
             elif isinstance(data_name, str):
-                data = dt.load(self.root + data_name)
+                data = dt.load(DATA_HOME + data_name)
             SUMMARY.build_vocab(data)
-            torch.save(SUMMARY, '{}/field/field.SUMMARY.pkl'.format(self.root))
+            torch.save(SUMMARY, DATA_HOME + self.config['data']['field_summary'])
         else:
             return 
     
@@ -94,7 +97,7 @@ class Vocab(object):
         """
         load a field
         """
-        return torch.load(self.root + field_name)
+        return torch.load(DATA_HOME + field_name)
         
 
 class classGraphDataset(InMemoryDataset):
@@ -110,15 +113,12 @@ class classGraphDataset(InMemoryDataset):
 
     @property
     def raw_file_names(self):
-        return ['data.BASE_METHOD.json', 'data.BASE_SUMMARY.json', 'data.CLASS_METHOD.json']
+        return [config['data']['raw_base_method'].replace('/raw/',''), config['data']['raw_base_summary'].replace('/raw/',''),
+         config['data']['raw_class_method'].replace('/raw/','')]
 
     @property
     def processed_file_names(self):
-        return ['data.base.pt']
-
-    def download(self):
-        # download dataset from internet
-        pass
+        return [config['data']['graph_dataset']]
             
     def class_graph(self, x, edge_index, y=None):
         data = Data(x=x, edge_index=edge_index, y=y)
@@ -128,8 +128,8 @@ class classGraphDataset(InMemoryDataset):
         base_method_path = self.raw_paths[0]
         base_summary_path = self.raw_paths[1]
         class_path = self.raw_paths[2]
-        method_field = torch.load('data/field/field.METHOD.pkl')
-        summary_field = torch.load('data/field/field.SUMMARY.pkl')
+        method_field = torch.load(DATA_HOME + config['data']['field_method'])
+        summary_field = torch.load(DATA_HOME + config['data']['field_summary'])
         # [[method0_class0, method0_class1, ...,], [method1_class0, method1_class1, ...,]]
         class_list = dt.load(class_path, 'class') 
         # [method0, method1, ...,]
@@ -171,15 +171,26 @@ class classGraphDataset(InMemoryDataset):
 
 
 if __name__ == '__main__':
-    vocab = Vocab(DATA_HOME)
+    vocab = Vocab(config)
+    print('-'*20 + 'Build raw data'+ '-'*20)
     vocab.build_raw_data(data_name=CLASS_DATA, category='class', key='class_methods')
+    print('raw data of `class method` has been built, saved in {}'.format(DATA_HOME+config['data']['raw_class_method']))
     vocab.build_raw_data(data_name=BASE_DATA, category='base', key='method')
+    print('raw data of `base method` has been built, saved in {}'.format(DATA_HOME+config['data']['raw_base_method']))
     vocab.build_raw_data(data_name=BASE_DATA, category='base', key='summary')
-
+    print('raw data of `base method` has been built, saved in {}'.format(DATA_HOME+config['data']['raw_base_method']))
+    
+    print('-'*20 + 'Build summary and method vocab'+ '-'*20)
     vocab.build_vocab(data_name=[config['data']['raw_base_method'], config['data']['raw_class_method']], key='method')
+    print('vocab of `method` has been built, saved in {}'.format(DATA_HOME+config['data']['field_method']))
     vocab.build_vocab(data_name=config['data']['raw_base_summary'], key='summary')
+    print('vocab of `summary` has been built, saved in {}'.format(DATA_HOME+config['data']['field_summary']))
+    
+    print('-'*20 + 'Build class graph dataset'+ '-'*20)
+    classGraphDataset(DATA_HOME, config)
+    print('graph dataset saved in {}'.format(DATA_HOME+'/processed/'+config['data']['graph_dataset']))
 
-    # test the `field`
+    print('-'*20 + 'Test the `field`'+ '-'*20)
     method_vocab = vocab.load_vocab(config['data']['field_method'])
     summary_vocab = vocab.load_vocab(config['data']['field_summary'])
     method = [["override", "public", "object"]]
@@ -187,4 +198,4 @@ if __name__ == '__main__':
     print(method_vocab.process(method).T, method_vocab.process(method).T.size())
     print(summary_vocab.process(summary).T, summary_vocab.process(summary).T.size())
 
-    classGraphDataset(config['data']['home'])
+   

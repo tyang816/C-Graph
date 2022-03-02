@@ -1,0 +1,30 @@
+data:
+  home: data
+  base: /base.large.json
+  class: /class.large.json
+  field_summary: /field/field.SUMMARY.large.pkl
+  field_method: /field/field.METHOD.large.pkl
+  raw_base_method: /raw/data.BASE_METHOD.large.json
+  raw_base_summary: /raw/data.BASE_SUMMARY.large.json
+  raw_class_method: /raw/data.CLASS_METHOD.large.json
+  graph_dataset: data.large.pt
+  
+model:
+  embed_size: 128
+  hidden_size: 128
+  weight_decay: 0.0001
+  batch_size: 4
+  max_code_len: 100
+  max_com_len: 20
+  max_node_num: 100
+  gat_input_size: 256
+  gat_hidden_size: 256
+  gat_dropout: 0.1
+
+train:
+  run_times: 5
+  lr: 0.001
+
+etc:
+  author: tanyang
+  info_prefix: context-aware
