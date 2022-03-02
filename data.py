@@ -29,7 +29,7 @@ eos = '</s>'
 
 
 # load config
-config_path = './configs/small_config.yml'
+config_path = './configs/large_config.yml'
 config = yaml.load(open(config_path), Loader=yaml.FullLoader)
 # data source
 DATA_HOME = config['data']['home']
