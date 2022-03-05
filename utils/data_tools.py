@@ -13,7 +13,7 @@ import json
 import re
 import torch
 
-def load(path, key=None):
+def load_raw(path, key=None):
     """
     load raw data
 

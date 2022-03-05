@@ -74,9 +74,9 @@ class Vocab(object):
             if isinstance(data_name, list):
                 data = []
                 for i in range(len(data_name)):
-                    data = data + dt.load(DATA_HOME + data_name[i])
+                    data = data + dt.load_raw(DATA_HOME + data_name[i])
             elif isinstance(data_name, str):
-                data = dt.load(DATA_HOME + data_name)
+                data = dt.load_raw(DATA_HOME + data_name)
             METHOD.build_vocab(data)
             torch.save(METHOD, DATA_HOME + self.config['data']['field_method'])
         elif key == 'summary':
@@ -85,9 +85,9 @@ class Vocab(object):
             if isinstance(data_name, list):
                 data = []
                 for i in range(len(data_name)):
-                    data = data + dt.load(DATA_HOME + data_name[i])
+                    data = data + dt.load_raw(DATA_HOME + data_name[i])
             elif isinstance(data_name, str):
-                data = dt.load(DATA_HOME + data_name)
+                data = dt.load_raw(DATA_HOME + data_name)
             SUMMARY.build_vocab(data)
             torch.save(SUMMARY, DATA_HOME + self.config['data']['field_summary'])
         else:
@@ -131,11 +131,11 @@ class classGraphDataset(InMemoryDataset):
         method_field = torch.load(DATA_HOME + config['data']['field_method'])
         summary_field = torch.load(DATA_HOME + config['data']['field_summary'])
         # [[method0_class0, method0_class1, ...,], [method1_class0, method1_class1, ...,]]
-        class_list = dt.load(class_path, 'class') 
+        class_list = dt.load_raw(class_path, 'class') 
         # [method0, method1, ...,]
-        base_method_list = dt.load(base_method_path, 'base')
+        base_method_list = dt.load_raw(base_method_path, 'base')
         # [summary0, summary1, ...,]
-        base_summary_list = dt.load(base_summary_path, 'base')
+        base_summary_list = dt.load_raw(base_summary_path, 'base')
         # each data in the list is a class level graph
         data_list = []
         # the index of `classes`([method0_class0, method0_class1, ...,]) corresponds to the index of `base_method`
