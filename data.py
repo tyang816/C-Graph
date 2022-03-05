@@ -21,15 +21,12 @@ import utils.data_tools as dt
 
 
 # define the reserved tokens
-reserved_tokens = ['<unk>', '<pad>', '<s>', '</s>']
-unk = '<unk>'
-pad = '<pad>'
 bos = '<s>'
 eos = '</s>'
 
 
 # load config
-config_path = './configs/large_config.yml'
+config_path = './configs/small_config.yml'
 config = yaml.load(open(config_path), Loader=yaml.FullLoader)
 # data source
 DATA_HOME = config['data']['home']
@@ -69,7 +66,7 @@ class Vocab(object):
         """
         if key == 'method':
             METHOD = Field(sequential=True, lower=True, init_token=bos, eos_token=eos, 
-                           pad_token=pad, unk_token=unk, fix_length=self.config['model']['max_code_len'])
+                           fix_length=self.config['model']['max_code_len'])
             # METHOD vocab can built by a list of files or a single file
             if isinstance(data_name, list):
                 data = []
@@ -81,7 +78,7 @@ class Vocab(object):
             torch.save(METHOD, DATA_HOME + self.config['data']['field_method'])
         elif key == 'summary':
             SUMMARY = Field(sequential=True, lower=True, init_token=bos, eos_token=eos, 
-                            pad_token=pad, unk_token=unk, fix_length=self.config['model']['max_com_len'])
+                            fix_length=self.config['model']['max_com_len'])
             if isinstance(data_name, list):
                 data = []
                 for i in range(len(data_name)):
@@ -149,8 +146,8 @@ class classGraphDataset(InMemoryDataset):
             # iterate over the entire `classes` to create `edge_index` and graph
             classes = class_list[base_idx]
             for c in classes:
-                # max node number 100
-                if len(node_list) >= 100:
+                # max node number
+                if len(node_list) >= config['model']['max_node_num']:
                     break
                 if c not in node_list:
                     node_list.append(c)
@@ -158,7 +155,7 @@ class classGraphDataset(InMemoryDataset):
                 # where i means the index of `classes`, edges are bidirectional
                 edge_index.append([0, node_list.index(c)])
                 edge_index.append([node_list.index(c), 0])
-            for i in range(100 - len(node_list)):
+            for i in range(config['model']['max_node_num'] - len(node_list)):
                 node_list.append(['<pad>'])
             # convert to tensor
             x = method_field.process(node_list).T
@@ -193,7 +190,7 @@ if __name__ == '__main__':
     print('-'*20 + 'Test the `field`'+ '-'*20)
     method_vocab = vocab.load_vocab(config['data']['field_method'])
     summary_vocab = vocab.load_vocab(config['data']['field_summary'])
-    method = [["override", "public", "object"]]
+    method = [["<s>", "override", "public", "object"]]
     summary = [["answers", "a", "copy", "of", "this", "object"]]
     print(method_vocab.process(method).T, method_vocab.process(method).T.size())
     print(summary_vocab.process(summary).T, summary_vocab.process(summary).T.size())

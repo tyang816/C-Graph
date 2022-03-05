@@ -10,8 +10,9 @@ bin-release/
 __pycache__/
 
 # data
-/data/base.large.json
-/data/class.large.json
+*.large.*
+/data/processed/data.large10.pt
+
 
 # Executables
 *.swf

@@ -7,16 +7,16 @@ data:
   raw_base_method: /raw/data.BASE_METHOD.large.json
   raw_base_summary: /raw/data.BASE_SUMMARY.large.json
   raw_class_method: /raw/data.CLASS_METHOD.large.json
-  graph_dataset: data.large.pt
+  graph_dataset: data.large10.pt
   
 model:
   embed_size: 128
   hidden_size: 128
   weight_decay: 0.0001
-  batch_size: 4
+  batch_size: 20
   max_code_len: 100
   max_com_len: 20
-  max_node_num: 100
+  max_node_num: 10
   gat_input_size: 256
   gat_hidden_size: 256
   gat_dropout: 0.1

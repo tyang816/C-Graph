@@ -9,9 +9,6 @@ data:
   raw_class_method: /raw/data.CLASS_METHOD.json
   graph_dataset: data.base.pt
 
-preprocess:
-  token_size: 100
-  
 model:
   embed_size: 128
   hidden_size: 128
@@ -19,7 +16,7 @@ model:
   batch_size: 4
   max_code_len: 100
   max_com_len: 20
-  max_node_num: 100
+  max_node_num: 10
   gat_input_size: 256
   gat_hidden_size: 256
   gat_dropout: 0.1
