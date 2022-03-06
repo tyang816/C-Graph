@@ -184,7 +184,7 @@ if __name__ == '__main__':
     print('vocab of `summary` has been built, saved in {}'.format(DATA_HOME+config['data']['field_summary']))
     
     print('-'*20 + 'Build class graph dataset'+ '-'*20)
-    classGraphDataset(DATA_HOME, config)
+    classGraphDataset(DATA_HOME)
     print('graph dataset saved in {}'.format(DATA_HOME+'/processed/'+config['data']['graph_dataset']))
 
     print('-'*20 + 'Test the `field`'+ '-'*20)

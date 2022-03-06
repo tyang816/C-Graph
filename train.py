@@ -159,8 +159,8 @@ net, device = create_model(config)
 optimizer = optim.Adam(net.parameters(), lr=float(config['train']['lr']))
 loss_fn = nn.CrossEntropyLoss(ignore_index=1).to(device)
 train_loader = DataLoader(train_data, batch_size=config['model']['batch_size'], shuffle=True)
-valid_loader = DataLoader(valid_data, batch_size=config['model']['batch_size'], shuffle=True)
-test_loader = DataLoader(test_data, batch_size=config['model']['batch_size'], shuffle=True)
+valid_loader = DataLoader(valid_data, batch_size=2, shuffle=True)
+test_loader = DataLoader(test_data, batch_size=2, shuffle=True)
 
 # train
 history_acc = []

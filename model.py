@@ -98,12 +98,14 @@ class Decoder(nn.Module):
         self.fc_out = nn.DataParallel(nn.Linear(self.max_code_len, self.com_vocab_size))
 
     def forward(self, y, q, q_n, g):
+        
         # g_reshape: [batch_size, node_num, 2 * hidden_size]
-        g_reshape = g.contiguous().view(self.batch_size, -1, 2 * self.hidden_size)
+        g_reshape = g.view(-1, self.max_node_num, 2 * self.hidden_size)
         # qn_reshape: [batch_size, node_num, 2 * hidden_size]
-        qn_reshape = q_n.contiguous().view(self.batch_size, -1, 2 * self.hidden_size)
+        qn_reshape = q_n.view(-1, self.max_node_num, 2 * self.hidden_size)
         # q_reshape: [batch_size, node_num, code_len, 2 * hidden_size]
-        q_reshape = q.contiguous().view(self.batch_size, self.max_node_num, -1, 2 * self.hidden_size)
+        #print('q:',q.shape)
+        q_reshape = q.view(-1, self.max_node_num, self.max_code_len, 2 * self.hidden_size)
         # g_t: [batch_size, gat_input_size]
         g_t = g_reshape[:,0,:].squeeze(1)
         # qn_t: [batch_size, 2 * hidden_size]
@@ -123,7 +125,7 @@ class Decoder(nn.Module):
 
 
         """Graph Attention"""
-        # g_: [batch_size, node_num, hidden_size]
+        # g_: [batch_size, hidden_size, node_num]
         g_ = self.W_ga(g_reshape).transpose(1,2)
         # [batch_size, 1, hidden_size] x [batch_size, hidden_size, node_num]
         # socres/gamma: [batch_size, 1, node_num]
@@ -165,6 +167,7 @@ class Net(nn.Module):
         self.device = device
         self.batch_size = int(config['model']['batch_size'])
         self.com_vocab_size = int(config['model']['com_vocab_size'])
+        self.max_node_num = int(config['model']['max_node_num'])
         self.localEncoder = LocalEncoder(config, device)
         self.globalEncoder = GlobalEncoder(config, device)
         self.decoder = Decoder(config, device)
@@ -178,8 +181,10 @@ class Net(nn.Module):
         # q: [batch_size * node_num, 2 * hidden_size]
         g = self.globalEncoder(q_n, edge_index)
 
+        # the last data may not fill a batch
+        batch = int(g.shape[0]/self.max_node_num)
         y_len = y.shape[1]
-        outputs = torch.zeros(y_len, self.batch_size, self.com_vocab_size).to(self.device)
+        outputs = torch.zeros(y_len, batch, self.com_vocab_size).to(self.device)
         # y: [com_len, batch_size]
         y = y.transpose(1,0)
         # init_put: [batch_size]
